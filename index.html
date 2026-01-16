@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+    <meta charset="utf-8"/>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+    <title>Unity WebGL Player | 99Days</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bubbls/99itf@main/style.css"/>
+    <style>
+        html, body { padding: 0; margin: 0; overflow: hidden; height: 100%; background-color: #232323; }
+        #unity-container { width: 100%; height: 100%; position: absolute; }
+        #unity-canvas { width: 100%; height: 100%; background: #231f20; }
+        #loading-cover { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: #231f20; z-index: 10; flex-direction: column; color: white; font-family: sans-serif; }
+        #unity-loading-bar { width: 200px; }
+        #unity-progress-bar-empty { width: 100%; height: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px; margin-top: 10px; }
+        #unity-progress-bar-full { width: 0%; height: 100%; background: #4CAF50; border-radius: 5px; transition: width 0.2s; }
+        #status-text { margin-top: 15px; font-size: 14px; color: #aaa; }
+    </style>
+</head>
+<body>
+
+    <div id="unity-container">
+        <canvas id="unity-canvas" tabindex="-1"></canvas>
+        <div id="loading-cover">
+            <div id="unity-loading-bar">
+                <div id="unity-progress-bar-empty">
+                    <div id="unity-progress-bar-full"></div>
+                </div>
+            </div>
+            <div id="status-text">Checking files...</div>
+        </div>
+    </div>
+
+    <script>
+        const statusText = document.querySelector("#status-text");
+        const progressBarFull = document.querySelector("#unity-progress-bar-full");
+        
+        const buildUrl = "https://cdn.jsdelivr.net/gh/bubbls/99itf@main/Build";
+        const cdnBaseUrl = "https://cdn.jsdelivr.net/gh/bubbls/99itf@main/";
+
+        const dataParts = [
+            cdnBaseUrl + "Build.data.br.part0",
+            cdnBaseUrl + "Build.data.br.part1",
+            cdnBaseUrl + "Build.data.br.part2",
+            cdnBaseUrl + "Build.data.br.part3",
+        ];
+        const wasmParts = [
+            cdnBaseUrl + "Build.wasm.br.part0",
+            cdnBaseUrl + "Build.wasm.br.part1",
+            cdnBaseUrl + "Build.wasm.br.part2",
+            cdnBaseUrl + "Build.wasm.br.part3",
+            cdnBaseUrl + "Build.wasm.br.part4",
+        ];
+
+        async function fetchAndCombineParts(partUrls, type) {
+            const buffers = [];
+            for (let i = 0; i < partUrls.length; i++) {
+                statusText.innerText = `Downloading ${type} part ${i}...`;
+                console.log(`Fetching: ${partUrls[i]}`);
+                try {
+                    const response = await fetch(partUrls[i]);
+                    if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                    const buffer = await response.arrayBuffer();
+                    buffers.push(buffer);
+                } catch (e) {
+                    statusText.innerText = `FAILED to load ${type} part ${i}`;
+                    statusText.style.color = "red";
+                    console.error(`Error loading ${partUrls[i]}:`, e);
+                    throw e;
+                }
+            }
+            const totalLength = buffers.reduce((sum, buf) => sum + buf.byteLength, 0);
+            const combined = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const buffer of buffers) {
+                combined.set(new Uint8Array(buffer), offset);
+                offset += buffer.byteLength;
+            }
+            return new Blob([combined], { type: 'application/octet-stream' });
+        }
+
+        const config = {
+            dataUrl: "", 
+            frameworkUrl: buildUrl + "/Build.framework.js",
+            codeUrl: "", 
+            streamingAssetsUrl: "StreamingAssets",
+            companyName: "DefaultCompany",
+            productName: "99Days",
+            productVersion: "0.1"
+        };
+
+        const script = document.createElement("script");
+        script.src = buildUrl + "/Build.loader.js";
+        script.onload = async () => {
+            try {
+                statusText.innerText = "Stitching game files together...";
+                const [dataBlob, wasmBlob] = await Promise.all([
+                    fetchAndCombineParts(dataParts, "Data"),
+                    fetchAndCombineParts(wasmParts, "Engine")
+                ]);
+
+                config.dataUrl = URL.createObjectURL(dataBlob);
+                config.codeUrl = URL.createObjectURL(wasmBlob);
+
+                statusText.innerText = "Starting Unity Engine...";
+                createUnityInstance(document.querySelector("#unity-canvas"), config, (progress) => {
+                    progressBarFull.style.width = `${100 * progress}%`;
+                }).then((unityInstance) => {
+                    document.querySelector("#loading-cover").style.display = "none";
+                }).catch((message) => {
+                    statusText.innerText = "Unity Error: Check Console (F12)";
+                    console.error(message);
+                });
+            } catch (err) {
+                console.error("Critical Startup Error:", err);
+            }
+        };
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>
